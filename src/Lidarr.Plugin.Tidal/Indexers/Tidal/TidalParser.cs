@@ -149,6 +149,23 @@ namespace NzbDrone.Core.Indexers.Tidal
                 result.Title += $" ({year})";
             }
 
+            // Tidal exposes remaster/edition info in the album's "version" field
+            // (e.g. "Remastered 2011", "Deluxe Edition"). Surface it as a tag so
+            // different editions are distinguishable in the results list. Most albums
+            // have no version, so their titles are unaffected.
+            if (!string.IsNullOrWhiteSpace(x.Version))
+            {
+                result.Title += $" [{x.Version.Trim()}]";
+            }
+
+            // Immersive-audio editions (Dolby Atmos / 360 Reality Audio) are separate
+            // Tidal albums that often share the same title; tag them too. STEREO is the
+            // default and is never tagged.
+            foreach (var mode in GetAudioModeTags(x.AudioModes))
+            {
+                result.Title += $" [{mode}]";
+            }
+
             if (x.Explicit)
             {
                 result.Title += " [Explicit]";
@@ -157,6 +174,27 @@ namespace NzbDrone.Core.Indexers.Tidal
             result.Title += $" [{format}] [WEB]";
 
             return result;
+        }
+
+        private static IEnumerable<string> GetAudioModeTags(string[] audioModes)
+        {
+            if (audioModes == null)
+            {
+                yield break;
+            }
+
+            foreach (var mode in audioModes)
+            {
+                switch (mode)
+                {
+                    case "DOLBY_ATMOS":
+                        yield return "Dolby Atmos";
+                        break;
+                    case "SONY_360RA":
+                        yield return "360 Reality Audio";
+                        break;
+                }
+            }
         }
     }
 }

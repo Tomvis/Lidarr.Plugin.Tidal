@@ -36,6 +36,9 @@ public partial class TidalSearchResponse
         [JsonProperty("title")]
         public string Title { get; set; }
 
+        [JsonProperty("version")]
+        public string Version { get; set; }
+
         [JsonProperty("duration")]
         public long Duration { get; set; }
 
