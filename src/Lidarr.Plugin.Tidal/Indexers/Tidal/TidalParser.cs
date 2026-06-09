@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using NzbDrone.Common.Http;
@@ -59,7 +61,8 @@ namespace NzbDrone.Core.Indexers.Tidal
                 qualityList.Add(AudioQuality.LOSSLESS);
 
             var quality = Enum.Parse<AudioQuality>(result.AudioQuality);
-            return qualityList.Select(q => ToReleaseInfo(result, q));
+            var edition = GetAlbumEdition(result);
+            return qualityList.Select(q => ToReleaseInfo(result, q, edition));
         }
 
         private async Task<IEnumerable<ReleaseInfo>> ProcessTrackAlbumResultAsync(TidalSearchResponse.Track result)
@@ -75,7 +78,7 @@ namespace NzbDrone.Core.Indexers.Tidal
             }
         }
 
-        private static ReleaseInfo ToReleaseInfo(TidalSearchResponse.Album x, AudioQuality bitrate)
+        private static ReleaseInfo ToReleaseInfo(TidalSearchResponse.Album x, AudioQuality bitrate, string edition)
         {
             var publishDate = DateTime.UtcNow;
             var year = 0;
@@ -149,13 +152,14 @@ namespace NzbDrone.Core.Indexers.Tidal
                 result.Title += $" ({year})";
             }
 
-            // Tidal exposes remaster/edition info in the album's "version" field
-            // (e.g. "Remastered 2011", "Deluxe Edition"). Surface it as a tag so
-            // different editions are distinguishable in the results list. Most albums
-            // have no version, so their titles are unaffected.
-            if (!string.IsNullOrWhiteSpace(x.Version))
+            // Edition/remaster tag. Tidal sometimes labels editions at the album level
+            // ("version"), but it mirrors that into the album title, so tagging it again
+            // is redundant. The genuinely-hidden case is a remaster labelled only on the
+            // track titles (e.g. "Song (2009 Remaster)") while the album stays clean.
+            // GetAlbumEdition() surfaces that, de-duped against the album title.
+            if (!string.IsNullOrWhiteSpace(edition))
             {
-                result.Title += $" [{x.Version.Trim()}]";
+                result.Title += $" [{edition}]";
             }
 
             // Immersive-audio editions (Dolby Atmos / 360 Reality Audio) are separate
@@ -195,6 +199,86 @@ namespace NzbDrone.Core.Indexers.Tidal
                         break;
                 }
             }
+        }
+
+        // Cache of albumId -> derived edition ("" = checked, none found) so repeated
+        // searches (RSS/wanted) don't re-fetch tracks for the same album every time.
+        private static readonly ConcurrentDictionary<string, string> _editionCache = new();
+
+        // A trailing parenthetical that names an album-wide edition, e.g. "(2009 Remaster)".
+        // Restricted to edition-ish keywords so per-track variants like "(feat. X)" or
+        // "(Live)" don't get mistaken for an album edition.
+        private static readonly Regex EditionSuffixRegex = new(
+            @"\(([^()]*\b(?:remaster(?:ed)?|re-?master|mono|stereo|deluxe|anniversary|expanded|reissue)\b[^()]*)\)\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Returns an edition string to tag the album with, or null. When Tidal already
+        // labels the album ("version") it mirrors it into the title, so we don't tag it
+        // again; otherwise we look for an edition labelled only on the track titles.
+        private static string GetAlbumEdition(TidalSearchResponse.Album album)
+        {
+            var candidate = !string.IsNullOrWhiteSpace(album.Version)
+                ? album.Version.Trim()
+                : DeriveEditionFromTracks(album);
+
+            if (string.IsNullOrWhiteSpace(candidate))
+                return null;
+
+            // don't duplicate what's already in the album title
+            if (!string.IsNullOrEmpty(album.Title) &&
+                album.Title.Contains(candidate, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            return candidate;
+        }
+
+        // Fetches the album's tracks and lifts a shared trailing edition suffix
+        // (e.g. "2009 Remaster") when most tracks carry it. Costs one extra API call per
+        // unlabelled album; the result is cached per album id for the process lifetime.
+        private static string DeriveEditionFromTracks(TidalSearchResponse.Album album)
+        {
+            if (_editionCache.TryGetValue(album.Id, out var cached))
+                return string.IsNullOrEmpty(cached) ? null : cached;
+
+            JArray items;
+            try
+            {
+                var response = TidalAPI.Instance.Client.API.GetAlbumTracks(album.Id).GetAwaiter().GetResult();
+                items = response?["items"] as JArray;
+            }
+            catch
+            {
+                // transient network/parse issue - skip the tag, don't cache so we retry later
+                return null;
+            }
+
+            string edition = null;
+            if (items != null && items.Count > 0)
+            {
+                var matches = items
+                    .Select(t => (string)t["title"])
+                    .Where(title => !string.IsNullOrEmpty(title))
+                    .Select(title => EditionSuffixRegex.Match(title))
+                    .Where(m => m.Success)
+                    .Select(m => m.Groups[1].Value.Trim())
+                    .ToList();
+
+                if (matches.Count > 0)
+                {
+                    var top = matches
+                        .GroupBy(s => s, StringComparer.OrdinalIgnoreCase)
+                        .OrderByDescending(g => g.Count())
+                        .First();
+
+                    // require the edition to be shared by most tracks, so a single
+                    // oddly-named bonus track can't mislabel the whole album
+                    if (top.Count() >= items.Count * 0.6)
+                        edition = top.First();
+                }
+            }
+
+            _editionCache[album.Id] = edition ?? "";
+            return edition;
         }
     }
 }
