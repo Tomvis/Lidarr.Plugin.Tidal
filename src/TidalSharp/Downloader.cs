@@ -182,6 +182,15 @@ public class Downloader
                 .BuildRequest(url);
             var response = await _client.ProcessRequestAsync(request);
 
+            if (response.HasHttpError)
+            {
+                // signed stream urls expire; never let an error body (e.g. CloudFront AccessDenied XML)
+                // masquerade as audio data. drop the cached manifest so a retry fetches a fresh one.
+                lock (_cachedStreamData)
+                    _cachedStreamData.Remove((trackId, quality));
+                throw new UnavailableMediaException($"Segment {i + 1}/{urls.Length} of track {trackId} returned HTTP {(int)response.StatusCode}; stream urls likely expired.");
+            }
+
             outStream.Write(response.ResponseData);
             onChunkDownloaded?.Invoke(i+1);
         }
@@ -205,8 +214,11 @@ public class Downloader
 
     private async Task<TrackStreamData> GetTrackStreamData(string trackId, AudioQuality quality, CancellationToken token = default)
     {
-        if (_cachedStreamData.TryGetValue((trackId, quality), out TrackStreamData? data))
-            return data;
+        lock (_cachedStreamData)
+        {
+            if (_cachedStreamData.TryGetValue((trackId, quality), out var cached) && DateTime.UtcNow < cached.expiresAt)
+                return cached.data;
+        }
 
         var result = await _api.Call(HttpMethod.Get, $"tracks/{trackId}/playbackinfopostpaywall",
             urlParameters: new()
@@ -219,11 +231,15 @@ public class Downloader
         );
         var streamData = result.ToObject<TrackStreamData>()!;
         lock (_cachedStreamData)
-            _cachedStreamData.Add((trackId, quality), streamData);
+            _cachedStreamData[(trackId, quality)] = (streamData, DateTime.UtcNow + _streamDataTtl);
         return streamData;
     }
 
-    private Dictionary<(string trackId, AudioQuality quality), TrackStreamData> _cachedStreamData = [];
+    // manifests contain CloudFront-signed urls with a short (~1h) expiry; a stale entry poisons
+    // every retry with guaranteed AccessDenied responses, so keep entries well below that.
+    private static readonly TimeSpan _streamDataTtl = TimeSpan.FromMinutes(10);
+
+    private Dictionary<(string trackId, AudioQuality quality), (TrackStreamData data, DateTime expiresAt)> _cachedStreamData = [];
 }
 
 public class DownloadData<T>(T data, string fileExtension) : IDisposable
