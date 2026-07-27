@@ -154,7 +154,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
                 }
             }
 
-            await TidalAPI.Instance.Client.Downloader.ApplyMetadataToFile(track, outPath, MediaResolution.s640, plainLyrics, token: cancellation);
+            await TidalAPI.Instance.Client.Downloader.ApplyMetadataToFile(track, outPath, MediaResolution.s1280, plainLyrics, token: cancellation);
 
             if (syncLyrics != null)
                 await CreateLrcFile(Path.Combine(outDir, MetadataUtilities.GetFilledTemplate("%volume% - %track% - %title%.%ext%", "lrc", page, _tidalAlbum)), syncLyrics);
