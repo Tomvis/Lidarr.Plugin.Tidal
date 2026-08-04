@@ -70,6 +70,30 @@ public class TidalUser
     public string TokenType => _data.TokenType;
 
     public long UserId => _data.UserId;
-    public string CountryCode => _sessionInfo?.CountryCode ?? "";
+
+    // _sessionInfo is NOT serialised, so it is null on every restart until
+    // GetSession() has run — and GetSession() is called *after* the user is
+    // installed as the active one (Core.CheckForStoredUser / Core.Login), and
+    // may throw, in which case a user with no session info stays installed.
+    // API.Call() copies this straight into the countryCode query parameter, and
+    // Tidal rejects an EMPTY countryCode with "countryCode parameter missing"
+    // rather than defaulting it — which surfaced as intermittent
+    // APIException on GetAlbum during indexer parsing, silently dropping search
+    // results. The OAuth payload persisted in lastUser.json already carries the
+    // account's country, so fall back to it: same value, always available.
+    public string CountryCode
+    {
+        get
+        {
+            var sessionCountry = _sessionInfo?.CountryCode;
+            if (!string.IsNullOrEmpty(sessionCountry))
+                return sessionCountry;
+            return _data?.User?.CountryCode ?? "";
+        }
+    }
+
+    // Deliberately NOT given the same fallback: Core.IsLoggedIn() treats an
+    // empty SessionID as "not logged in" to trigger a re-login, and the OAuth
+    // payload has no session id to substitute anyway.
     public string SessionID => _sessionInfo?.SessionId ?? "";
 }
