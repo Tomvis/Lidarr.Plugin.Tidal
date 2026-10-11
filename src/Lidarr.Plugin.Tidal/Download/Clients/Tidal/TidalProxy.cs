@@ -7,6 +7,7 @@ using NzbDrone.Common.Cache;
 using NzbDrone.Common.Disk;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Download.Clients.Tidal.Queue;
+using NzbDrone.Core.Music;
 using NzbDrone.Core.Parser;
 using NzbDrone.Core.Parser.Model;
 using TidalSharp.Data;
@@ -24,9 +25,13 @@ namespace NzbDrone.Core.Download.Clients.Tidal
     {
         private readonly ICached<DateTime?> _startTimeCache;
         private readonly DownloadTaskQueue _taskQueue;
+        private readonly ITrackService _trackService;
+        private readonly Logger _logger;
 
-        public TidalProxy(ICacheManager cacheManager, Logger logger)
+        public TidalProxy(ICacheManager cacheManager, ITrackService trackService, Logger logger)
         {
+            _trackService = trackService;
+            _logger = logger;
             _startTimeCache = cacheManager.GetCache<DateTime?>(GetType(), "startTimes");
             _taskQueue = new(500, null, logger);
 
@@ -60,7 +65,8 @@ namespace NzbDrone.Core.Download.Clients.Tidal
         {
             _taskQueue.SetSettings(settings);
 
-            var downloadItem = await DownloadItem.From(remoteAlbum);
+            var (wanted, trackCount) = LidarrWantedTracks.For(remoteAlbum, _trackService);
+            var downloadItem = await DownloadItem.From(remoteAlbum, wanted, trackCount, _logger);
             await _taskQueue.QueueBackgroundWorkItemAsync(downloadItem);
             return downloadItem.ID;
         }

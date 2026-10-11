@@ -149,3 +149,7 @@ _temp_*/**/*
 ## Merge any idea folder
 */**/.idea
 *.iml
+
+# Tomvis fork tests
+Lidarr.Plugin.Tidal.Tests/[Bb]in/
+Lidarr.Plugin.Tidal.Tests/[Oo]bj/

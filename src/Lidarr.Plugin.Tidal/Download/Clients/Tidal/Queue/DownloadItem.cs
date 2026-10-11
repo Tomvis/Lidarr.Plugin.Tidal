@@ -16,7 +16,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
 {
     public class DownloadItem
     {
-        public static async Task<DownloadItem> From(RemoteAlbum remoteAlbum)
+        public static async Task<DownloadItem> From(RemoteAlbum remoteAlbum, List<WantedTrack> wanted = null, int releaseTrackCount = 0, Logger logger = null)
         {
             var url = remoteAlbum.Release.DownloadUrl.Trim();
             var quality = remoteAlbum.Release.Container switch
@@ -42,7 +42,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
                         _tidalUrl = tidalUrl,
                     };
 
-                    await item.SetTidalData();
+                    await item.SetTidalData(wanted, releaseTrackCount, logger);
                 }
             }
 
@@ -222,7 +222,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
             return filePath;
         }
 
-        private async Task SetTidalData(CancellationToken cancellation = default)
+        private async Task SetTidalData(List<WantedTrack> wanted, int releaseTrackCount, Logger logger, CancellationToken cancellation = default)
         {
             if (_tidalUrl.EntityType != EntityType.Album)
                 throw new InvalidOperationException();
@@ -230,7 +230,24 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
             var album = await TidalAPI.Instance.Client.API.GetAlbum(_tidalUrl.Id, cancellation);
             var albumTracks = await TidalAPI.Instance.Client.API.GetAlbumTracks(_tidalUrl.Id, cancellation);
 
-            var tracksTasks = albumTracks["items"]!.Select(async t =>
+            var items = albumTracks["items"]!.ToList();
+            if (wanted != null)
+            {
+                var tidalTracks = items.Select(t => new TidalAlbumTrack(t["id"]!.ToString(), API.CompleteTitleFromPage(t),
+                    t["volumeNumber"]?.Value<int>() ?? 1, t["trackNumber"]?.Value<int>() ?? 0, t["duration"]?.Value<int>() ?? 0)).ToList();
+                var ids = WantedTrackFilter.Select(tidalTracks, wanted, releaseTrackCount);
+                if (ids == null)
+                {
+                    logger?.Warn("Tidal album {0}: could not match all {1} wanted tracks, downloading the whole album", _tidalUrl.Id, wanted.Count);
+                }
+                else
+                {
+                    logger?.Info("Tidal album {0}: downloading {1} wanted of {2} tracks", _tidalUrl.Id, ids.Count, items.Count);
+                    items = items.Where(t => ids.Contains(t["id"]!.ToString())).ToList();
+                }
+            }
+
+            var tracksTasks = items.Select(async t =>
             {
                 var chunks = await TidalAPI.Instance.Client.Downloader.GetChunksInTrack(t["id"]!.ToString(), Bitrate, cancellation);
                 return (t["id"]!.ToString(), chunks);
