@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lidarr.Common", "..\ext\Lid
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TidalSharp", "TidalSharp\TidalSharp.csproj", "{67972C8A-E989-4796-AC23-D8371AC8350F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lidarr.Plugin.Tidal.Tests", "..\Lidarr.Plugin.Tidal.Tests\Lidarr.Plugin.Tidal.Tests.csproj", "{EC820B46-4CB4-477A-8A85-11E933530BDA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -93,6 +95,18 @@ Global
 		{67972C8A-E989-4796-AC23-D8371AC8350F}.Release|x64.Build.0 = Release|Any CPU
 		{67972C8A-E989-4796-AC23-D8371AC8350F}.Release|x86.ActiveCfg = Release|Any CPU
 		{67972C8A-E989-4796-AC23-D8371AC8350F}.Release|x86.Build.0 = Release|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Debug|x64.Build.0 = Debug|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Debug|x86.Build.0 = Debug|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Release|x64.ActiveCfg = Release|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Release|x64.Build.0 = Release|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Release|x86.ActiveCfg = Release|Any CPU
+		{EC820B46-4CB4-477A-8A85-11E933530BDA}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
