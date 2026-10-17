@@ -125,10 +125,12 @@ public class API
         // Tomvis fork (MUSIC-113): bounded, shared backoff instead of retrying forever
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
+            // trip before giving up too, so callers after a give-up see IsRateLimited and skip instead of starting over
+            var delay = _rateLimit.Trip(attempt, response.Headers.GetSingleValue("Retry-After"));
             if (attempt >= RateLimitGate.MaxAttempts)
                 throw new RateLimitedException($"Tidal rate limit: {path} still 429 after {attempt} attempts");
 
-            await Task.Delay(_rateLimit.Trip(attempt, response.Headers.GetSingleValue("Retry-After")), token);
+            await Task.Delay(delay, token);
             return await Call(method, path, formParameters, urlParameters, headers, baseUrl, token, attempt + 1);
         }
 
