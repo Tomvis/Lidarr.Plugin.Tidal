@@ -15,6 +15,9 @@ namespace NzbDrone.Core.Indexers.Tidal
 {
     public class TidalParser : IParseIndexerResponse
     {
+        // Tomvis fork (MUSIC-113): full-album lookups for track results, per response page
+        private const int MaxTrackAlbumLookups = 20;
+
         public TidalIndexerSettings Settings { get; set; }
 
         public IList<ReleaseInfo> ParseResponse(IndexerResponse response)
@@ -30,16 +33,20 @@ namespace NzbDrone.Core.Indexers.Tidal
                 torrentInfos.AddRange(task);
             }
 
-            foreach (var track in jsonResponse.TrackResults.Items)
+            var lookups = TrackAlbumLookups.Select(
+                jsonResponse.AlbumResults.Items.Select(a => a.Id),
+                jsonResponse.TrackResults.Items.Select(t => t.Album.Id),
+                MaxTrackAlbumLookups);
+
+            foreach (var albumId in lookups)
             {
-                // make sure the album hasn't already been processed before doing this
-                if (!jsonResponse.AlbumResults.Items.Any(a => a.Id == track.Album.Id))
-                {
-                    var processTrackTask = ProcessTrackAlbumResultAsync(track);
-                    processTrackTask.Wait();
-                    if (processTrackTask.Result != null)
-                        torrentInfos.AddRange(processTrackTask.Result);
-                }
+                // these are extras on top of the album results; don't hold the search while Tidal is throttling
+                if (TidalSharp.API.IsRateLimited)
+                    break;
+
+                var album = GetFullAlbum(albumId);
+                if (album != null)
+                    torrentInfos.AddRange(ProcessAlbumResult(album));
             }
 
             return torrentInfos
@@ -65,14 +72,18 @@ namespace NzbDrone.Core.Indexers.Tidal
             return qualityList.Select(q => ToReleaseInfo(result, q, edition));
         }
 
-        private async Task<IEnumerable<ReleaseInfo>> ProcessTrackAlbumResultAsync(TidalSearchResponse.Track result)
+        private static TidalSearchResponse.Album GetFullAlbum(string albumId)
         {
             try
             {
-                var album = (await TidalAPI.Instance.Client.API.GetAlbum(result.Album.Id)).ToObject<TidalSearchResponse.Album>(); // track albums hold much less data so we get the full one
-                return ProcessAlbumResult(album);
+                // track albums hold much less data so we get the full one
+                return TidalAPI.Instance.Client.API.GetAlbum(albumId).GetAwaiter().GetResult().ToObject<TidalSearchResponse.Album>();
             }
             catch (ResourceNotFoundException) // seems to occur in some cases, not sure why. i blame tidal
+            {
+                return null;
+            }
+            catch (APIException) // incl. rate limited: skip this album, keep the rest of the response
             {
                 return null;
             }
@@ -239,6 +250,10 @@ namespace NzbDrone.Core.Indexers.Tidal
         {
             if (_editionCache.TryGetValue(album.Id, out var cached))
                 return string.IsNullOrEmpty(cached) ? null : cached;
+
+            // MUSIC-113: the tag is optional; skip it (uncached) rather than wait out a 429 cooldown per album
+            if (TidalSharp.API.IsRateLimited)
+                return null;
 
             JArray items;
             try

@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../src/Lidarr.Plugin.Tidal/Download/Clients/Tidal/WantedTrackFilter.cs" Link="WantedTrackFilter.cs" />
+    <Compile Include="../src/Lidarr.Plugin.Tidal/Indexers/Tidal/TrackAlbumLookups.cs" Link="TrackAlbumLookups.cs" />
+    <Compile Include="../src/TidalSharp/RateLimitGate.cs" Link="RateLimitGate.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />

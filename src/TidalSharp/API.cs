@@ -20,6 +20,11 @@ public class API
     private Session _session;
     private TidalUser? _activeUser;
 
+    private static readonly RateLimitGate _rateLimit = new();
+
+    // True while Tidal is answering 429; callers can skip optional lookups instead of queueing up.
+    public static bool IsRateLimited => _rateLimit.IsCoolingDown;
+
     public async Task<JObject> GetTrack(string id, CancellationToken token = default) => await Call(HttpMethod.Get, $"tracks/{id}", token: token);
     public async Task<TidalLyrics?> GetTrackLyrics(string id, CancellationToken token = default)
     {
@@ -79,10 +84,15 @@ public class API
         Dictionary<string, string>? urlParameters = null,
         Dictionary<string, string>? headers = null,
         string? baseUrl = null,
-        CancellationToken token = default
+        CancellationToken token = default,
+        int attempt = 1
     )
     {
         // currently the method is ignored, but that doesn't matter much since it's all GET
+
+        var cooldown = _rateLimit.Remaining;
+        if (cooldown > TimeSpan.Zero)
+            await Task.Delay(cooldown, token);
 
         baseUrl ??= Globals.API_V1_LOCATION;
 
@@ -112,11 +122,14 @@ public class API
 
         var response = await _httpClient.ProcessRequestAsync(request);
 
-        // this is a side-precaution, in my testing it wouldn't happen assuming lidarr is properly rate limiting
+        // Tomvis fork (MUSIC-113): bounded, shared backoff instead of retrying forever
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
-            await Task.Delay(Random.Shared.Next(100, 1000));
-            return await Call(method, path, formParameters, urlParameters, headers, baseUrl, token);
+            if (attempt >= RateLimitGate.MaxAttempts)
+                throw new RateLimitedException($"Tidal rate limit: {path} still 429 after {attempt} attempts");
+
+            await Task.Delay(_rateLimit.Trip(attempt, response.Headers.GetSingleValue("Retry-After")), token);
+            return await Call(method, path, formParameters, urlParameters, headers, baseUrl, token, attempt + 1);
         }
 
         string resp = response.Content;
