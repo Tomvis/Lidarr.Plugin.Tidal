@@ -127,37 +127,55 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
             if (!Directory.Exists(outDir))
                 Directory.CreateDirectory(outDir);
 
-            await TidalAPI.Instance.Client.Downloader.WriteRawTrackToFile(track, Bitrate, outPath, (i) => DownloadedSize++, cancellation);
-            outPath = HandleAudioConversion(outPath, settings);
-
-            var plainLyrics = string.Empty;
-            string syncLyrics = null;
-
-            var lyrics = await TidalAPI.Instance.Client.Downloader.FetchLyricsFromTidal(track, cancellation);
-            if (lyrics.HasValue)
+            // Tomvis fork (MUSIC-149): build each track in its own folder and move it into place when it is
+            // complete. Two grabs of one album used to write and remux the same path at once, leaving a
+            // truncated FLAC for Lidarr to import.
+            var workDir = Path.Combine(settings.DownloadPath, ".incomplete", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(workDir);
+            try
             {
-                plainLyrics = lyrics.Value.plainLyrics;
+                var workPath = Path.Combine(workDir, Path.GetFileName(outPath));
+                await TidalAPI.Instance.Client.Downloader.WriteRawTrackToFile(track, Bitrate, workPath, (i) => DownloadedSize++, cancellation);
+                workPath = HandleAudioConversion(workPath, settings);
 
-                if (settings.SaveSyncedLyrics)
-                    syncLyrics = lyrics.Value.syncLyrics;
-            }
+                var decoded = FFMPEG.DecodedSeconds(workPath) ?? 0;
+                if (!DownloadIntegrity.IsComplete(decoded, duration))
+                    throw new IOException($"Track {track} decoded {decoded:F1}s of {duration}s; refusing a truncated file");
 
-            if (settings.UseLRCLIB && (string.IsNullOrWhiteSpace(plainLyrics) || (settings.SaveSyncedLyrics && !(syncLyrics?.Any() ?? false))))
-            {
-                lyrics = await TidalAPI.Instance.Client.Downloader.FetchLyricsFromLRCLIB("lrclib.net", songTitle, artistName, albumTitle, duration, cancellation);
+                var plainLyrics = string.Empty;
+                string syncLyrics = null;
+
+                var lyrics = await TidalAPI.Instance.Client.Downloader.FetchLyricsFromTidal(track, cancellation);
                 if (lyrics.HasValue)
                 {
-                    if (string.IsNullOrWhiteSpace(plainLyrics))
-                        plainLyrics = lyrics.Value.plainLyrics;
-                    if (settings.SaveSyncedLyrics && !(syncLyrics?.Any() ?? false))
+                    plainLyrics = lyrics.Value.plainLyrics;
+
+                    if (settings.SaveSyncedLyrics)
                         syncLyrics = lyrics.Value.syncLyrics;
                 }
+
+                if (settings.UseLRCLIB && (string.IsNullOrWhiteSpace(plainLyrics) || (settings.SaveSyncedLyrics && !(syncLyrics?.Any() ?? false))))
+                {
+                    lyrics = await TidalAPI.Instance.Client.Downloader.FetchLyricsFromLRCLIB("lrclib.net", songTitle, artistName, albumTitle, duration, cancellation);
+                    if (lyrics.HasValue)
+                    {
+                        if (string.IsNullOrWhiteSpace(plainLyrics))
+                            plainLyrics = lyrics.Value.plainLyrics;
+                        if (settings.SaveSyncedLyrics && !(syncLyrics?.Any() ?? false))
+                            syncLyrics = lyrics.Value.syncLyrics;
+                    }
+                }
+
+                await TidalAPI.Instance.Client.Downloader.ApplyMetadataToFile(track, workPath, MediaResolution.s1280, plainLyrics, token: cancellation);
+                File.Move(workPath, Path.ChangeExtension(outPath, Path.GetExtension(workPath)), true);
+
+                if (syncLyrics != null)
+                    await CreateLrcFile(Path.Combine(outDir, MetadataUtilities.GetFilledTemplate("%volume% - %track% - %title%.%ext%", "lrc", page, _tidalAlbum)), syncLyrics);
             }
-
-            await TidalAPI.Instance.Client.Downloader.ApplyMetadataToFile(track, outPath, MediaResolution.s1280, plainLyrics, token: cancellation);
-
-            if (syncLyrics != null)
-                await CreateLrcFile(Path.Combine(outDir, MetadataUtilities.GetFilledTemplate("%volume% - %track% - %title%.%ext%", "lrc", page, _tidalAlbum)), syncLyrics);
+            finally
+            {
+                Directory.Delete(workDir, true);
+            }
 
             // TODO: this is currently a waste of resources, if this pr ever gets merged, it can be reenabled
             // https://github.com/Lidarr/Lidarr/pull/4370

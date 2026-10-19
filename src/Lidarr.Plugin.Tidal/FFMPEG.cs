@@ -22,6 +22,16 @@ internal class FFMPEG
             throw new FFMPEGException($"Conversion without re-encode failed\n{a}\n{errorOutput}");
     }
 
+    // decodes the whole file; returns the seconds of audio actually present (MUSIC-149)
+    public static double? DecodedSeconds(string input)
+    {
+        var (exitCode, output, errorOutput, a) = Call("ffmpeg", $"-nostdin -v error -i {EncodeParameterArgument(input)} -map 0:a:0 -f null -progress pipe:1 -nostats -");
+        if (exitCode != 0)
+            throw new FFMPEGException($"Decoding failed\n{a}\n{errorOutput}");
+
+        return NzbDrone.Core.Download.Clients.Tidal.DownloadIntegrity.ParseDecodedSeconds(output);
+    }
+
     public static void Reencode(string input, string output, int bitrate)
     {
         var (exitCode, _, errorOutput, a) = Call("ffmpeg", $"-y -i {EncodeParameterArgument(input)} -b:a {bitrate}k {EncodeParameterArgument(output)}");
