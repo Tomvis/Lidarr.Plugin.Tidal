@@ -166,7 +166,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
                     }
                 }
 
-                await TidalAPI.Instance.Client.Downloader.ApplyMetadataToFile(track, workPath, MediaResolution.s1280, plainLyrics, token: cancellation);
+                await TidalAPI.Instance.Client.Downloader.ApplyMetadataToFile(track, workPath, MediaResolution.s640, plainLyrics, token: cancellation);
                 File.Move(workPath, Path.ChangeExtension(outPath, Path.GetExtension(workPath)), true);
 
                 if (syncLyrics != null)

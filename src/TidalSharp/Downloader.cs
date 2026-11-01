@@ -79,7 +79,7 @@ public class Downloader
         return response.ResponseData;
     }
 
-    public async Task ApplyMetadataToTrackStream(string trackId, DownloadData<Stream> trackData, MediaResolution coverResolution = MediaResolution.s1280, string lyrics = "", CancellationToken token = default)
+    public async Task ApplyMetadataToTrackStream(string trackId, DownloadData<Stream> trackData, MediaResolution coverResolution = MediaResolution.s640, string lyrics = "", CancellationToken token = default)
     {
         byte[] magicBuffer = new byte[4];
         await trackData.Data.ReadAsync(magicBuffer.AsMemory(0, 4), token);
@@ -93,7 +93,7 @@ public class Downloader
         trackData.Data.Seek(0, SeekOrigin.Begin);
     }
 
-    public async Task ApplyMetadataToTrackBytes(string trackId, DownloadData<byte[]> trackData, MediaResolution coverResolution = MediaResolution.s1280, string lyrics = "", CancellationToken token = default)
+    public async Task ApplyMetadataToTrackBytes(string trackId, DownloadData<byte[]> trackData, MediaResolution coverResolution = MediaResolution.s640, string lyrics = "", CancellationToken token = default)
     {
         FileBytesAbstraction abstraction = new("track" + trackData.FileExtension, trackData.Data);
         using TagLib.File file = TagLib.File.Create(abstraction);
@@ -104,7 +104,7 @@ public class Downloader
         trackData.Data = finalData;
     }
 
-    public async Task ApplyMetadataToFile(string trackId, string trackPath, MediaResolution coverResolution = MediaResolution.s1280, string lyrics = "", CancellationToken token = default)
+    public async Task ApplyMetadataToFile(string trackId, string trackPath, MediaResolution coverResolution = MediaResolution.s640, string lyrics = "", CancellationToken token = default)
     {
         using TagLib.File file = TagLib.File.Create(trackPath);
         await ApplyMetadataToTagLibFile(file, trackId, coverResolution, lyrics, token);
@@ -139,13 +139,13 @@ public class Downloader
 
     // TODO: video downloading, this is less important as this is mainly for lidarr
 
-    private async Task ApplyMetadataToTagLibFile(TagLib.File track, string trackId, MediaResolution coverResolution = MediaResolution.s1280, string lyrics = "", CancellationToken token = default)
+    private async Task ApplyMetadataToTagLibFile(TagLib.File track, string trackId, MediaResolution coverResolution = MediaResolution.s640, string lyrics = "", CancellationToken token = default)
     {
         JToken trackData = await _api.GetTrack(trackId, token);
         string albumId = trackData["album"]!["id"]!.ToString();
         JToken albumPage = await _api.GetAlbum(albumId, token);
 
-        byte[]? albumArt = await GetCoverBytes(trackData["album"]!["cover"]!.ToString(), coverResolution, token);
+        byte[]? albumArt = await TryGetCoverBytes(trackData["album"]!["cover"]!.ToString(), coverResolution, token);
 
         track.Tag.Title = API.CompleteTitleFromPage(trackData);
         track.Tag.Album = API.CompleteTitleFromPage(albumPage);
@@ -165,22 +165,6 @@ public class Downloader
         track.Save();
     }
 
-    // tidal does not publish the largest cover size for every release, so ask for the requested
-    // resolution first and step down to s640 when it is missing. the s640 floor is a deliberate
-    // compatibility choice, not a quality guarantee: s640 is what this plugin embedded before the
-    // bump, so stopping there leaves every release no worse off than it was. it is knowingly below
-    // what downstream art taggers accept (artextra's front_min_edge is 1000), so a release with no
-    // s1280 asset still ends up with sub-threshold art embedded - that is the accepted trade.
-    private async Task<byte[]?> GetCoverBytes(string coverId, MediaResolution coverResolution, CancellationToken token = default)
-    {
-        var albumArt = await TryGetCoverBytes(coverId, coverResolution, token);
-
-        if (albumArt == null && coverResolution > MediaResolution.s640)
-            albumArt = await TryGetCoverBytes(coverId, MediaResolution.s640, token);
-
-        return albumArt;
-    }
-
     // null means "do not embed this". an ok status is not proof of an image: an empty or truncated
     // body, or an error page served as 200, becomes a picture with no mime type, and taggers that
     // only fill in art for files that have none would never replace it.
@@ -192,7 +176,7 @@ public class Downloader
         return IsUsableCover(data) ? data : null;
     }
 
-    // this path never asks for less than s640 and the cdn only serves jpeg here, so anything under
+    // covers are fetched at s640 and the cdn only serves jpeg here, so anything under
     // a kilobyte or without an image header is a truncated or non-image body.
     private static bool IsUsableCover(byte[]? data)
         => data != null && data.Length >= 1024 &&
